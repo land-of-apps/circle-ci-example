@@ -75,3 +75,51 @@ jobs:
         uses: getappmap/archive-action@v1
         with: 
           revision: ${base_sha}
+
+  appmap-analysis:
+    needs: [download_and_archive_base_revision]
+    runs-on: ubuntu-latest
+    env:
+      head_sha: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install AppMap tools
+        uses: getappmap/install-action@v1
+        with:
+          directory: .
+          install-appmap-library: false
+
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: ${{env.s3_role_name}}
+          role-session-name: ${{env.s3_session_name}}
+          aws-region: ${{env.s3_region}}
+
+      - name: Look for head revision AppMaps
+        shell: bash
+        run: | 
+          set +e
+          while true; do 
+            aws s3 ls s3://${appmap_storage_bucket}/${head_sha}.tar
+            exit_status=$?
+              if [ $exit_status -eq 0 ]; then
+                echo "s3://${appmap_storage_bucket}/${head_sha}.tar exists, continuing..."
+                break
+              else
+                echo "${head_sha}.tar does not exist. Waiting 10 seconds."
+                sleep 10
+              fi
+          done
+      - name: Download and extract appmaps
+        run: | 
+          aws s3 cp s3://${appmap_storage_bucket}/${head_sha}.tar ${head_sha}.tar 
+          tar xvf ${head_sha}.tar
+    
+      - name: Analyze AppMaps
+        uses: getappmap/analyze-action@v1
+        with:
+          directory: .
+          base-revision: ${{ github.event.pull_request.base.sha }}
+          head-revision: ${{ github.event.pull_request.head.sha }}
